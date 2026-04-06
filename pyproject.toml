@@ -4,16 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-security-scan"
-version = "0.2.0"
-description = "Static security scanner for AI-generated web app code. Finds hardcoded secrets, injection risks, CORS misconfigs and more."
+version = "0.3.0"
+description = "Multi-domain code quality gate for AI-generated apps. Security scanning, linting, SAST, SCA, IaC, container, testing, coverage, and duplication detection."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-keywords = ["security", "scanner", "static-analysis", "secrets", "devsecops", "sast", "vite", "react"]
+keywords = ["security", "scanner", "static-analysis", "secrets", "devsecops", "sast", "quality-gate", "lint", "sca"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
 ]
@@ -21,9 +22,13 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
+yaml = ["pyyaml>=6"]
 
 [project.scripts]
 security-scan = "security_scanner.cli:main"
+
+[project.entry-points."ai_security_scan.domains"]
+security = "security_scanner.domains.builtin:BuiltinSecurityDomain"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/security_scanner"]

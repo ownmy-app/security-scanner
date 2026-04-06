@@ -2,232 +2,206 @@
 
 Built by the [Nometria](https://nometria.com) team. We help developers take apps built with AI tools (Lovable, Bolt, Base44, Replit) to production — handling deployment to AWS, security, scaling, and giving you full code ownership. [Learn more →](https://nometria.com)
 
-> Static security scanner purpose-built for AI-generated web app code.
+> Multi-domain code quality gate for AI-generated web apps.
 
 AI code generators (Lovable, Bolt, v0, Cursor, Copilot) frequently produce code with
 hardcoded secrets, missing auth guards, SQL injection patterns, and CORS misconfigs.
-This scanner catches those before they hit production.
+This scanner catches those before they hit production — plus linting, SAST, SCA, and more.
 
-**Zero dependencies. Pure Python stdlib.**
+**Zero dependencies for core security rules. Pure Python stdlib.**
 
 ---
 
 ## Quick start
 
 ```bash
-# Clone and install
-git clone https://github.com/nometria/security-scanner
-cd security-scanner
 pip install -e .
 
+# One-command setup (generates config + Claude Code integration)
+security-scan init
+
 # Scan your project
-security-scan ./my-app
+security-scan .
 
-# Scan a directory and output JSON
-security-scan ./my-app --format json
-
-# Scan the included example file
-security-scan examples/ --no-color
+# Scan and auto-fix lint issues
+security-scan . --fix
 ```
 
 ---
 
-## Rules
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `security-scan .` | Scan the current directory |
+| `security-scan init` | Generate config, `.mcp.json`, and `.claude/CLAUDE.md` |
+| `security-scan doctor` | Validate environment (config, tools, MCP) |
+| `security-scan serve` | Start MCP stdio server for Claude Code |
+| `security-scan tools list` | Show managed tool status |
+| `security-scan tools install trivy` | Download a managed tool binary |
+
+---
+
+## CLI flags
+
+```bash
+security-scan [PATH] [OPTIONS]
+
+Options:
+  --format {console,json,sarif,markdown}  Output format (default: console)
+  --output FILE            Write output to file
+  --fail-on LEVEL          Exit 1 at this severity: critical, high, medium, low (default: high)
+  --mode {full,incremental,pr}  Scan mode (default: full)
+  --base-ref REF           Base branch for PR mode (default: auto-detect)
+  --domains DOMAIN,...     Comma-separated domains to run (default: all available)
+  --fix                    Auto-fix lint issues (ruff, eslint)
+  --dashboard              Generate QUALITY.md report
+  --watch                  Watch for file changes and re-scan
+  --config FILE            Config file path
+  --strict                 Missing tools are findings
+  --no-color               Disable ANSI colors
+```
+
+---
+
+## Security rules (SEC-001 — SEC-012)
 
 | Rule | Severity | Catches |
 |------|----------|---------|
-| SEC-001 | 🔴 CRITICAL | Hardcoded API keys, tokens, passwords, JWT secrets |
-| SEC-002 | 🟠 HIGH | `.env` file committed without `.gitignore` entry |
-| SEC-003 | 🟠 HIGH | Dangerous `eval()` / `exec()` usage |
-| SEC-004 | 🟠 HIGH | SQL injection (string interpolation in queries) |
-| SEC-005 | 🟠 HIGH | Missing auth middleware on API routes |
-| SEC-006 | 🟡 MEDIUM | CORS wildcard `*` in production code |
-| SEC-007 | 🔵 LOW | HTTP (not HTTPS) hardcoded URLs |
-| SEC-008 | 🟠 HIGH | Exposed admin routes without auth |
-| SEC-009 | 🟠 HIGH | Auth tokens stored in `localStorage` (XSS risk) |
-| SEC-010 | 🟡 MEDIUM | `process.env` values logged to console |
-| SEC-011 | 🔴 CRITICAL | Supabase `service_role` key used client-side |
-| SEC-012 | 🟡 MEDIUM | Dependency confusion risk in `package.json` |
+| SEC-001 | CRITICAL | Hardcoded API keys, tokens, passwords, JWT secrets |
+| SEC-002 | HIGH | `.env` file committed without `.gitignore` entry |
+| SEC-003 | HIGH | Dangerous `eval()` / `exec()` usage |
+| SEC-004 | HIGH | SQL injection (string interpolation in queries) |
+| SEC-005 | HIGH | Missing auth middleware on API routes (Express/FastAPI) |
+| SEC-006 | MEDIUM | CORS wildcard `*` in production code |
+| SEC-007 | LOW | HTTP (not HTTPS) hardcoded URLs |
+| SEC-008 | HIGH | Exposed admin routes without auth |
+| SEC-009 | HIGH | Auth tokens stored in `localStorage` (XSS risk) |
+| SEC-010 | MEDIUM | `process.env` values logged to console |
+| SEC-011 | CRITICAL | Supabase `service_role` key used client-side |
+| SEC-012 | MEDIUM | Dependency confusion risk in `package.json` |
 
 ---
 
-## Install
+## Scan domains
+
+Beyond the built-in security rules, the scanner can invoke external tools:
+
+| Domain | Tools | What it checks |
+|--------|-------|---------------|
+| **security** | built-in (always available) | 12 regex rules (SEC-001 — SEC-012) |
+| **lint** | Ruff, ESLint, Biome, Clippy, GoLangCI-Lint | Code style and logic errors |
+| **typecheck** | MyPy, Pyright, tsc | Static type errors |
+| **sast** | OpenGrep / Semgrep | Security vulnerabilities via SAST rules |
+| **sca** | Trivy | Dependency CVE scanning |
+| **iac** | Checkov | Infrastructure-as-code misconfigurations |
+| **container** | Trivy | Dockerfile misconfigurations |
+
+Domains auto-detect which tools are installed. Missing tools are silently skipped
+(or flagged with `--strict`).
 
 ```bash
-pip install security-scan        # PyPI (coming soon)
+# Run only security + lint
+security-scan . --domains security,lint
 
-# From source:
-git clone https://github.com/nometria/security-scanner
-cd security-scanner
-pip install -e .
-```
-
----
-
-## Usage
-
-```bash
-# Scan current directory
+# Run everything available
 security-scan .
-
-# Scan a specific project
-security-scan ./my-vite-app
-
-# JSON output (for CI pipelines)
-security-scan . --format json --output report.json
-
-# SARIF output (GitHub Code Scanning)
-security-scan . --format sarif --output results.sarif
-
-# Markdown report
-security-scan . --format markdown --output security-report.md
-
-# Only fail on critical issues (default: high+)
-security-scan . --fail-on critical
-
-# No color (CI-friendly)
-security-scan . --no-color
-
-# Watch mode — re-scans on file changes (polls every 2s)
-security-scan . --watch
-
-# Watch with JSON output
-security-scan ./my-app --watch --format json
 ```
 
-### Watch mode
+---
 
-The `--watch` flag monitors your project for file changes and re-runs the scan automatically.
-Uses lightweight mtime polling (every 2 seconds) with zero extra dependencies -- no `watchdog` needed.
+## Claude Code / MCP integration
 
-On each change only the modified files are re-scanned (incremental), while the full findings
-list is kept up to date. The terminal is cleared and refreshed so you always see a clean report.
+The scanner integrates with Claude Code via the Model Context Protocol.
 
-```
-$ security-scan ./my-app --watch
-
-[14:31:55] Full scan
-
-══════════════════════════════════════════════════════════════════════
-  SECURITY SCAN — 12 files scanned, 3 findings
-══════════════════════════════════════════════════════════════════════
-  ...
-
-Watching for changes... (Ctrl+C to stop)
-
-[14:32:07] Re-scanned 1 changed file(s)
-
-══════════════════════════════════════════════════════════════════════
-  SECURITY SCAN — 13 files scanned, 2 findings
-══════════════════════════════════════════════════════════════════════
-  ...
-
-Watching for changes... (Ctrl+C to stop)
-```
-
-In watch mode the process runs continuously and does not exit on findings, making it suitable
-for IDE integration and development workflows.
-
-### IDE integration
-
-Run the scanner in a side terminal while you code -- findings update live as you save files.
-
-**VS Code** -- open a terminal pane (`Ctrl+`` `) and run:
 ```bash
-security-scan --watch .
-```
-Split the terminal so the scan output is always visible beside your editor.
+# One-time setup
+security-scan init
 
-**JetBrains (WebStorm / PyCharm)** -- add an *External Tool* or *Run Configuration*:
-- Program: `security-scan`
-- Arguments: `--watch $ProjectFileDir$`
-- Working directory: `$ProjectFileDir$`
-
-**Neovim / tmux** -- keep a tmux split running:
-```bash
-tmux split-window -h 'security-scan --watch .'
+# This generates:
+#   ai-security-scan.yml    — scan configuration
+#   .mcp.json               — tells Claude Code to use our MCP server
+#   .claude/CLAUDE.md       — instructions for Claude
 ```
 
-**CI / pre-commit** -- for one-shot scans in CI, omit `--watch`:
-```bash
-security-scan . --format sarif --output results.sarif --fail-on high
+After `init`, restart Claude Code. Claude can then:
+- Run `scan` to check the project
+- Run `scan_file` to check a single file
+- Run `explain` to get details on a finding
+- Run `status` to see available domains and tools
+
+---
+
+## Configuration
+
+Create `ai-security-scan.yml` in your project root (or run `security-scan init`):
+
+```yaml
+# Which domains to run (empty = all available)
+domains: [security, lint, sca]
+
+# Scan mode: full | incremental | pr
+scan_mode: full
+
+# Fail threshold: critical | high | medium | low
+fail_on: high
+
+# Generate QUALITY.md dashboard
+dashboard: false
+
+# Auto-fix lint issues on scan
+fix: false
+
+# Directories to skip
+exclude_patterns:
+  - node_modules
+  - .git
+  - dist
+  - build
+
+# Per-domain tool config
+tool_overrides:
+  lint:
+    ruff:
+      select: [E, F, W]
 ```
 
 ---
 
 ## GitHub Action
 
-Use the composite GitHub Action for a turnkey CI integration with PR comments, SARIF upload, and configurable failure thresholds.
-
 ```yaml
-# .github/workflows/security-scan.yml
 name: Security Scan
-on:
-  push:
-    branches: [main]
-  pull_request:
+on: [push, pull_request]
 
 permissions:
   contents: read
-  pull-requests: write
   security-events: write
 
 jobs:
-  security-scan:
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: nometria/security-scanner@main
         with:
           target_dir: '.'
-          format: 'text'
-          fail_on_findings: 'true'
           fail_on: 'high'
-          post_comment: 'true'
           sarif_upload: 'true'
 ```
 
-### Action inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `target_dir` | `.` | Directory to scan |
-| `format` | `text` | Output format: `text`, `json`, or `markdown` |
-| `fail_on_findings` | `true` | Fail the action if findings meet the severity threshold |
-| `fail_on` | `high` | Minimum severity to fail: `critical`, `high`, `medium`, `low`, `any` |
-| `post_comment` | `true` | Post results as a PR comment (pull_request events only) |
-| `sarif_upload` | `true` | Upload SARIF results to GitHub Code Scanning |
-| `python_version` | `3.11` | Python version to use |
-
-### Action outputs
-
-| Output | Description |
-|--------|-------------|
-| `passed` | `true` if no findings at or above the fail threshold |
-| `findings_count` | Total number of findings |
-| `critical_count` | Number of critical findings |
-| `report` | Full scan report in the requested format |
-
-See [`examples/security-scan-action.yml`](examples/security-scan-action.yml) for a complete workflow example.
-
-#### Manual pip-based workflow
-
-If you prefer not to use the composite action, you can install and run directly:
+Or install directly:
 
 ```yaml
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install ai-security-scan
-      - run: security-scan . --format sarif --output results.sarif --fail-on high
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: results.sarif
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-python@v5
+    with: { python-version: '3.11' }
+  - run: pip install ai-security-scan
+  - run: security-scan . --format sarif --output results.sarif --fail-on high
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with: { sarif_file: results.sarif }
 ```
 
 ---
@@ -235,104 +209,42 @@ jobs:
 ## Use as a library
 
 ```python
-from security_scanner import scan_project
+from security_scanner import scan_project, scan_project_v2
 
+# Simple: built-in security rules only
 result = scan_project("./my-app")
+print(f"Passed: {result.passed}, Findings: {len(result.findings)}")
 
-print(f"Passed: {result.passed}")
-print(f"Critical: {result.critical_count}")
-
-for finding in result.findings:
-    print(f"[{finding.severity}] {finding.rule_id}: {finding.file}:{finding.line}")
-    print(f"  {finding.message}")
-    print(f"  Fix: {finding.fix}")
+# Multi-domain: security + lint + sca + any installed tools
+result = scan_project_v2("./my-app")
+for name, info in result.domain_results.items():
+    print(f"  {name}: {info['findings']} findings ({info['time']:.1f}s)")
 ```
 
 ---
 
-## Add custom rules
-
-```python
-from security_scanner.scanner import Finding, HIGH
-
-def check_no_http_fetch(path, rel, lines):
-    findings = []
-    for i, line in enumerate(lines, 1):
-        if 'fetch("http://' in line:
-            findings.append(Finding(
-                rule_id="CUSTOM-001", severity=HIGH,
-                file=rel, line=i,
-                message="fetch() called with HTTP URL",
-                fix="Use HTTPS for all fetch calls."
-            ))
-    return findings
-
-# Register in scanner.py scan_project() loop
-```
-
----
-
-## Immediate next steps
-1. ~~Publish to PyPI: `pip install ai-security-scan`~~ Done
-2. Publish to npm as `npx security-scan` wrapper
-3. ~~Submit to GitHub Marketplace as an Action~~ Done (`action.yml`)
-4. Add SEC-005 (missing auth middleware) — requires AST parsing
-5. ~~Add `--watch` mode for IDE integration~~ Done (`--watch` flag with incremental re-scan)
-
----
-
-## Commercial viability
-- **Open source** it — "security scanner for AI-generated code" is high SEO value
-- Drive inbound: every AI app builder user is a potential Nometria customer
-- Upsell: "scan found issues → let us help you fix and self-host securely"
-- GitHub App: auto-scan every PR, post findings as PR review comments — $9–19/mo/repo
-
----
-
-## Example output
-
-Running `security-scan examples/ --no-color` against the included `examples/vulnerable.js`:
+## Project structure
 
 ```
-Scanning /tmp/ownmy-releases/security-scanner/examples ...
-
-══════════════════════════════════════════════════════════════════════
-  SECURITY SCAN — 1 files scanned, 5 findings
-══════════════════════════════════════════════════════════════════════
-
-  🔴 [CRITICAL] SEC-001
-     File   : vulnerable.js:4
-     Issue  : Hardcoded API key detected
-     Code   : const API_KEY = "sk-live-abc123def456ghi789jkl012mno345pqr678";
-     Fix    : Move to environment variables. Never commit secrets to source control.
-
-  🔴 [CRITICAL] SEC-001
-     File   : vulnerable.js:5
-     Issue  : Hardcoded password detected
-     Code   : const DB_PASSWORD = "SuperSecret123!";
-     Fix    : Move to environment variables. Never commit secrets to source control.
-
-  🟠 [HIGH] SEC-003
-     File   : vulnerable.js:10
-     Issue  : Dangerous eval/exec usage — potential code injection
-     Code   : return eval(input);
-     Fix    : Avoid eval/exec with user input. Use JSON.parse() or safe alternatives.
-
-  🟠 [HIGH] SEC-004
-     File   : vulnerable.js:15
-     Issue  : Potential SQL injection — string interpolation in query
-     Code   : const query = `SELECT * FROM users WHERE id = ${userId}`;
-     Fix    : Use parameterised queries: db.query('SELECT * FROM t WHERE id = $1', [id])
-
-  🟠 [HIGH] SEC-004
-     File   : vulnerable.js:20
-     Issue  : Potential SQL injection — string interpolation in query
-     Code   : const sql = "SELECT * FROM products WHERE name = '" + term + "'";
-     Fix    : Use parameterised queries: db.query('SELECT * FROM t WHERE id = $1', [id])
-
-──────────────────────────────────────────────────────────────────────
-  Critical: 2  |  High: 3  |  Medium: 0  |  Low: 0
-  Overall: ❌ FAIL
-──────────────────────────────────────────────────────────────────────
+src/security_scanner/
+├── scanner.py          # Core: 12 security rules + scan_project + scan_project_v2
+├── cli.py              # CLI: scan, init, doctor, serve, tools
+├── config.py           # YAML config loader
+├── reporter.py         # Output: console, JSON, SARIF, Markdown
+├── detection.py        # Language/framework auto-detection
+├── dashboard.py        # QUALITY.md generator
+├── history.py          # Quality trending + health scores
+├── git_utils.py        # Git diff/branch utilities
+├── mcp.py              # MCP tool library (Python API)
+├── mcp_server.py       # MCP stdio server (for Claude Code)
+├── domains/
+│   ├── builtin.py      # Wraps the 12 SEC rules as a domain
+│   ├── lint.py         # Ruff, ESLint, Biome, Clippy, GoLangCI-Lint
+│   ├── typecheck.py    # MyPy, Pyright, tsc
+│   ├── sast.py         # OpenGrep / Semgrep
+│   ├── sca.py          # Trivy (dependency vulnerabilities)
+│   ├── iac.py          # Checkov (IaC misconfigs)
+│   └── container.py    # Trivy (Dockerfile misconfigs)
+├── provisioning/       # Managed tool download + verification
+└── agents/             # Diff analysis + finding review (optional)
 ```
-

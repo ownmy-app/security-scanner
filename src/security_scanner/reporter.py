@@ -179,6 +179,104 @@ def format_watch_output(result: ScanResult, formatter, changed_files=None,
     return "".join(parts)
 
 
+def format_summary(result: ScanResult) -> str:
+    """One-line summary suitable for CI status or commit messages."""
+    status = "PASS" if result.passed else "FAIL"
+    return (
+        f"[{status}] {result.scanned} files scanned, "
+        f"{len(result.findings)} findings "
+        f"({result.critical_count}C/{result.high_count}H/"
+        f"{result.medium_count}M)"
+    )
+
+
+def format_table(result: ScanResult) -> str:
+    """ASCII table format."""
+    if not result.findings:
+        return f"No findings ({result.scanned} files scanned).\n"
+
+    # Column widths
+    lines = []
+    header = f"{'Severity':10s} {'Rule':25s} {'File':30s} {'Line':>5s}  Message"
+    lines.append(header)
+    lines.append("-" * len(header))
+    for f in result.findings:
+        fpath = f.file[:28] + ".." if len(f.file) > 30 else f.file
+        lines.append(
+            f"{f.severity:10s} {f.rule_id:25s} {fpath:30s} {f.line:5d}  {f.message[:60]}"
+        )
+    lines.append("-" * len(header))
+    lines.append(
+        f"Total: {len(result.findings)} findings | "
+        f"C:{result.critical_count} H:{result.high_count} M:{result.medium_count}"
+    )
+    return "\n".join(lines)
+
+
+def format_ai_friendly(result: ScanResult) -> str:
+    """Structured text optimised for LLM consumption (Claude Code feedback loop)."""
+    lines = []
+    status = "PASS" if result.passed else "FAIL"
+    lines.append(f"SCAN_STATUS: {status}")
+    lines.append(f"FILES_SCANNED: {result.scanned}")
+    lines.append(f"TOTAL_FINDINGS: {len(result.findings)}")
+    lines.append(f"CRITICAL: {result.critical_count}")
+    lines.append(f"HIGH: {result.high_count}")
+    lines.append(f"MEDIUM: {result.medium_count}")
+    lines.append("")
+
+    # Domain results if present
+    if result.domain_results:
+        lines.append("DOMAIN_RESULTS:")
+        for name, dr in sorted(result.domain_results.items()):
+            lines.append(f"  {name}: findings={dr.get('findings', 0)} passed={dr.get('passed', True)} time={dr.get('time', 0):.1f}s")
+        lines.append("")
+
+    if result.findings:
+        lines.append("FINDINGS:")
+        for i, f in enumerate(result.findings, 1):
+            lines.append(f"  [{i}] {f.severity} {f.rule_id}")
+            lines.append(f"      file: {f.file}:{f.line}")
+            lines.append(f"      issue: {f.message}")
+            if f.fix:
+                lines.append(f"      fix: {f.fix}")
+            if f.domain != "security":
+                lines.append(f"      domain: {f.domain}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_mcp(result: ScanResult) -> str:
+    """JSON format optimised for MCP tool responses (concise, structured)."""
+    data = {
+        "status": "pass" if result.passed else "fail",
+        "scanned": result.scanned,
+        "summary": {
+            "critical": result.critical_count,
+            "high": result.high_count,
+            "medium": result.medium_count,
+            "total": len(result.findings),
+        },
+    }
+    if result.domain_results:
+        data["domains"] = result.domain_results
+    if result.findings:
+        data["findings"] = [
+            {
+                "rule": f.rule_id,
+                "sev": f.severity[0],  # C/H/M/L for compactness
+                "file": f.file,
+                "line": f.line,
+                "msg": f.message,
+                **({"fix": f.fix} if f.fix else {}),
+                **({"domain": f.domain} if f.domain != "security" else {}),
+            }
+            for f in result.findings
+        ]
+    return json.dumps(data, indent=2)
+
+
 def _sarif_level(severity: str) -> str:
     return {"CRITICAL": "error", "HIGH": "error",
             "MEDIUM": "warning", "LOW": "note"}.get(severity, "note")
