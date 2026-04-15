@@ -14,6 +14,10 @@ Checks:
   SEC-010  process.env values logged/printed to console
   SEC-011  Supabase service role key exposed client-side
   SEC-012  Dependency confusion risk (internal package names in package.json)
+  SEC-013  XSS risk: innerHTML / document.write / dangerouslySetInnerHTML
+  SEC-014  Path traversal — unvalidated file paths in sendFile/readFile
+  SEC-015  SSRF / Open redirect — user-controlled URLs in fetch/redirect
+  SEC-016  NoSQL injection — unsanitised user input in MongoDB queries
 """
 
 import re
@@ -306,7 +310,7 @@ def check_missing_auth_middleware(path: Path, rel: str, lines: List[str]) -> Lis
         if express_route.search(line):
             # Check if auth middleware is present in the same line or adjacent lines
             context = "\n".join(lines[max(0, i - 2):min(len(lines), i + 1)])
-            if not re.search(r'auth|protect|verify|guard|middleware|isAuthenticated|requireAuth', context, re.I):
+            if not re.search(r'\bauth|\bprotect(?!ed\b)|\bverify|\bguard|\bmiddleware\b|\bisAuthenticated\b|\brequireAuth\b', context, re.I):
                 findings.append(Finding(
                     rule_id="SEC-005", severity=HIGH,
                     file=rel, line=i,
@@ -346,7 +350,7 @@ def check_exposed_admin_routes(path: Path, rel: str, lines: List[str]) -> List[F
             context = "\n".join(lines[max(0, i - 2):min(len(lines), i + 1)])
             # Strip URL strings from context to avoid matching "admin" in the path
             context_no_urls = re.sub(r'["\'][^"\']*["\']', '', context)
-            if not re.search(r'auth|protect|guard|middleware|isAdmin|requireAdmin|checkRole|isAuthorized', context_no_urls, re.I):
+            if not re.search(r'\bauth|\bprotect(?!ed\b)|\bguard|\bmiddleware\b|\bisAdmin\b|\brequireAdmin\b|\bcheckRole\b|\bisAuthorized\b', context_no_urls, re.I):
                 findings.append(Finding(
                     rule_id="SEC-008", severity=HIGH,
                     file=rel, line=i,
@@ -426,6 +430,128 @@ def check_dependency_confusion(path: Path, rel: str, project_root: Path) -> List
     return findings
 
 
+
+def check_xss(path: Path, rel: str, lines: List[str]) -> List[Finding]:
+    """SEC-013: XSS risk — innerHTML, document.write, dangerouslySetInnerHTML, etc."""
+    findings = []
+    if path.suffix not in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+        return []
+    xss_patterns = [
+        (r'\.innerHTML\s*=', "innerHTML assignment — XSS risk if value contains user input"),
+        (r'\.outerHTML\s*=', "outerHTML assignment — XSS risk if value contains user input"),
+        (r'document\.write\s*\(', "document.write() — XSS risk with dynamic content"),
+        (r'dangerouslySetInnerHTML', "dangerouslySetInnerHTML — renders raw HTML (XSS risk)"),
+        (r'\.insertAdjacentHTML\s*\(', "insertAdjacentHTML — XSS risk with unsanitised HTML"),
+    ]
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("//") or stripped.startswith("*"):
+            continue
+        for pattern, message in xss_patterns:
+            if re.search(pattern, line):
+                findings.append(Finding(
+                    rule_id="SEC-013", severity=MEDIUM,
+                    file=rel, line=i,
+                    message=message,
+                    snippet=stripped[:80],
+                    fix="Use textContent instead of innerHTML. Sanitise HTML with DOMPurify before rendering.",
+                ))
+                break  # one finding per line
+    return findings
+
+
+def check_path_traversal(path: Path, rel: str, lines: List[str]) -> List[Finding]:
+    """SEC-014: Path traversal — unvalidated user input in file operations."""
+    findings = []
+    if path.suffix not in (".js", ".ts", ".mjs", ".cjs", ".py"):
+        return []
+    pt_patterns = [
+        (r'(?:sendFile|readFile|readFileSync|createReadStream)\s*\(\s*(?:req\.|params|query)', "File operation with unsanitised user input — path traversal risk"),
+        (r'(?:sendFile|readFile|readFileSync|createReadStream)\s*\(\s*(?:filePath|file_path|filepath)', "File operation with variable path — verify input is validated"),
+    ]
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        for pattern, message in pt_patterns:
+            if re.search(pattern, line, re.I):
+                findings.append(Finding(
+                    rule_id="SEC-014", severity=HIGH,
+                    file=rel, line=i,
+                    message=message,
+                    snippet=stripped[:80],
+                    fix="Validate and sanitise file paths. Use path.resolve() and check against a whitelist or base directory.",
+                ))
+                break
+    return findings
+
+
+def check_ssrf_redirect(path: Path, rel: str, lines: List[str]) -> List[Finding]:
+    """SEC-015: SSRF / Open redirect — user-controlled URLs in fetch, redirect, etc."""
+    findings = []
+    if path.suffix not in (".js", ".ts", ".mjs", ".cjs", ".py"):
+        return []
+    ssrf_patterns = [
+        (r'(?:fetch|axios\.get|axios\.post|http\.get|https\.get|request)\s*\(\s*(?:req\.|params|query)', "Server-Side Request Forgery — fetching user-supplied URL"),
+        (r'(?:fetch|axios\.get|axios\.post|http\.get|https\.get|request)\s*\(\s*(?:url|target|endpoint)\b', "Potential SSRF — fetching from variable URL (verify it is validated)"),
+    ]
+    redirect_patterns = [
+        (r'(?:res\.redirect|redirect)\s*\(\s*(?:req\.|params|query)', "Open redirect — redirecting to user-supplied URL"),
+        (r'(?:res\.redirect|redirect)\s*\(\s*(?:url|target|next|returnUrl|return_url|callback)\b', "Potential open redirect — redirecting to variable URL (verify validation)"),
+    ]
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        for pattern, message in ssrf_patterns:
+            if re.search(pattern, line, re.I):
+                findings.append(Finding(
+                    rule_id="SEC-015", severity=HIGH,
+                    file=rel, line=i,
+                    message=message,
+                    snippet=stripped[:80],
+                    fix="Validate URLs against an allowlist of trusted domains. Never fetch arbitrary user-supplied URLs.",
+                ))
+                break
+        for pattern, message in redirect_patterns:
+            if re.search(pattern, line, re.I):
+                findings.append(Finding(
+                    rule_id="SEC-015", severity=MEDIUM,
+                    file=rel, line=i,
+                    message=message,
+                    snippet=stripped[:80],
+                    fix="Validate redirect targets against an allowlist. Use relative paths or domain-checked URLs.",
+                ))
+                break
+    return findings
+
+
+def check_nosql_injection(path: Path, rel: str, lines: List[str]) -> List[Finding]:
+    """SEC-016: NoSQL injection — unsanitised user input in MongoDB/Mongoose queries."""
+    findings = []
+    if path.suffix not in (".js", ".ts", ".mjs", ".cjs", ".py"):
+        return []
+    nosql_patterns = [
+        (r'\.(?:find|findOne|findById|updateOne|updateMany|deleteOne|deleteMany|aggregate|countDocuments)\s*\(\s*\{[^}]*(?:req\.body|req\.query|req\.params)', "NoSQL injection — user input passed directly to MongoDB query"),
+        (r'\.(?:find|findOne|findById|updateOne|updateMany|deleteOne|deleteMany)\s*\(\s*(?:req\.body|req\.query)', "NoSQL injection — user input used as query object"),
+    ]
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("//") or stripped.startswith("#"):
+            continue
+        for pattern, message in nosql_patterns:
+            if re.search(pattern, line, re.I):
+                findings.append(Finding(
+                    rule_id="SEC-016", severity=HIGH,
+                    file=rel, line=i,
+                    message=message,
+                    snippet=stripped[:80],
+                    fix="Sanitise user input before passing to MongoDB queries. Use mongo-sanitize or validate input schema.",
+                ))
+                break
+    return findings
+
+
 # ── Single-file scanner ──────────────────────────────────────────────────────
 
 def _scan_single_file(path: Path, rel: str, project_root: Path) -> List[Finding]:
@@ -449,6 +575,10 @@ def _scan_single_file(path: Path, rel: str, project_root: Path) -> List[Finding]
     findings.extend(check_localstorage_auth(path, rel, lines))
     findings.extend(check_console_env(path, rel, lines))
     findings.extend(check_supabase_service_key_clientside(path, rel, lines))
+    findings.extend(check_xss(path, rel, lines))
+    findings.extend(check_path_traversal(path, rel, lines))
+    findings.extend(check_ssrf_redirect(path, rel, lines))
+    findings.extend(check_nosql_injection(path, rel, lines))
     return findings
 
 
