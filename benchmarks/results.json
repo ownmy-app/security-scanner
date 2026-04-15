@@ -4,7 +4,7 @@
   "total_detected": 55,
   "total_missed": 0,
   "false_positives": 0,
-  "scan_speed_files_per_sec": 5107,
+  "scan_speed_files_per_sec": 3601,
   "categories": [
     {
       "name": "Hardcoded Secrets",
